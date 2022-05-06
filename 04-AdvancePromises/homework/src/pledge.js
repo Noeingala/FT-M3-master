@@ -29,17 +29,48 @@ $Promise.prototype._internalReject = function (data) {
 $Promise.prototype.then = function (successCb, errorCb) {
       if(typeof successCb !== 'function') successCb = false;
       if(typeof errorCb !== 'function') errorCb = false;
-      this._handlerGroups.push({successCb, errorCb});
+      const downstreamPromise = new $Promise (()=>{});
+      this._handlerGroups.push({successCb, errorCb, downstreamPromise});
       if(this._state !== 'pending') this._callHandlers()
+      return downstreamPromise;
   };
 
 $Promise.prototype._callHandlers = function(){
     while(this._handlerGroups.length > 0){
         let current = this._handlerGroups.shift()
         if(this._state === 'fulfilled'){
-            current.successCb && current.successCb(this._value)
+          if(!current.successCb){
+            current.downstreamPromise._internalResolve(this._value); //la promesaB se resuelve al valor de la promesaA, siempre y cuendo no tenga un sh definido
+          } else {
+            try {
+              const result = current.successCb(this._value); // ejecuto el successh. EN EL TRY SI ES UN THROW ERROR VA AL CATCH 
+            if(result instanceof $Promise){                // si es una promesa...
+              result.then(value=>current.downstreamPromise._internalResolve(value),
+              err => current.downstreamPromise._internalReject(err)); //si result da un error, 
+            } else {
+              current.downstreamPromise._internalResolve(result);  //la promesa se resuelve a ese valor
+            }
+            } catch (e) {
+              current.downstreamPromise._internalReject(e); 
+            } 
+          }
+          //  current.successCb && current.successCb(this._value)
         }else if(this._state === 'rejected'){
-            current.errorCb && current.errorCb(this._value)
+          if(!current.errorCb){
+            current.downstreamPromise._internalReject(this._value);
+          } else {
+            try {
+              const result = current.errorCb(this._value);
+              if(result instanceof $Promise){
+                result.then(value=>current.downstreamPromise._internalResolve(value),
+                err=> current.downstreamPromise._internalReject(err));
+              } else {
+                current.downstreamPromise._internalResolve(result);
+              }
+            } catch (e) {
+              current.downstreamPromise._internalReject(e);
+            }
+          }
         }
     }
   };
